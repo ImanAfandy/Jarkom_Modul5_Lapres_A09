@@ -5,7 +5,7 @@ Kelompok A09:
     Iman Afandy (05111740000129)
     Nodas Uziel Putra Serpara (5111840007007)
     
- # A. Topolgoi 
+ # A. Topologi 
  
  <img src="topologi.png" width="600">
  
@@ -174,7 +174,7 @@ gateway 192.168.1.1
 
 ````````
 
-Routing
+# C. Routing
 
 `````
 route add -net 10.151.73.80  netmask 255.255.255.248 gw 192.168.5.2
@@ -183,12 +183,7 @@ route add -net 192.168.0.0 netmask 255.255.254.0 gw 192.168.2.2
 `````
 
 
-
-
-
-
-
-D. DHCP Server-Relay 
+# D. DHCP Server-Relay 
 
 Karena MOJOKERTO mnejadi DHCP Server, perlu diinstallkan dengan perintah apt-get install isc-dhcp-server, sedangkan KEDIRI dan
  BATU yang akan menjadi DHCP Relay, perlu diinstallkan dengan perintah apt-get install isc-dhcp-relay.
@@ -234,6 +229,129 @@ Kemudian DHCP dapat direstart dengan perintah service isc-dhcp-server restart.
 Sedangkan untuk kedua DHCP Relay yaitu KEDIRI dan BATU akan diset untuk mendengarkan DHCP Server diberikan IP MOJOKERTO yaitu 10.151.73.83.
 
 
+# 1. SURABAYA bisa akses keluar tanpa MASQUERADE
+
+Ditambahkan perintah iptables sebagai berikut di SURABAYA:
+
+```
+iptables -t nat -A POSTROUTING -s 192.168.0.0/16 -o eth0 -j SNAT --to-source 10.151.72.40
+```
+
+# 2. Akses SSH di luar topologi (UML) akan di-DROP ketika mengakses server yang memiliki IP DMZ (lakukan setting di SURABAYA)
+
+Ditambahkan perintah iptables sebagai berikut di SURABAYA:
+
+````
+iptables -N LOGGING
+iptables -A FORWARD -p tcp --dport 22 -d 10.151.73.80/29 -i eth0 -j LOGGING
+iptables -A LOGGING -m limit --limit 5/min -j LOG --log-prefix "iptables_FORWARD_denied: " --log-level 7
+iptables -A LOGGING -j DROP
+````
+
+Diberikan beberapa syntax tambahan berupa logging untuk memenuhi soal no.7 yaitu melakukan logging untuk semua paket yang di-DROP. SSH memiliki nomor port 22.
+
+# 3. DHCP Server dan DNS Server maksimal menerima 3 koneksi ICMP secara bersamaan, selebihnya di-DROP (disetting pada masing-masing server)
+
+Ditambahkan perintah iptables sebagai berikut di MALANG (DNS Server) dan MOJOKERTO (DHCP Server):
+````
+
+iptables -N LOGGING
+iptables -A INPUT -p icmp -m connlimit --connlimit-above 3 --connlimit-mask 0 -j LOGGING
+iptables -A LOGGING -m limit --limit 5/min -j LOG --log-prefix "iptables_FORWARD_denied: " --log-level 7
+iptables -A LOGGING -j DROP
+`````
+
+Diberikan beberapa syntax tambahan berupa logging untuk memenuhi soal no.7 yaitu melakukan logging untuk semua paket yang di-DROP.
+
+# 4-5. SIDOARJO dan GRESIK diberikan waktu akses untuk mengakses server MALANG:
+
+SIDOARJO = 07:00 - 17:00 (Senin - Jumat) GRESIK = 17:00 - 07:00 (Setiap Hari) Ditambahkan perintah iptables sebagai berikut di MALANG:
+
+````
+iptables -A INPUT -s 192.168.4.0/24 -m time --timestart 07:00 --timestop 17:00 --weekdays Mon,Tue,Wed,Thu,Fri -j ACCEPT
+iptables -A INPUT -s 192.168.0.0/24 -m time --timestart 17:00 --timestop 23:59 -j ACCEPT
+iptables -A INPUT -s 192.168.0.0/24 -m time --timestart 00:00 --timestop 07:00 -j ACCEPT
+iptables -A INPUT -s 192.168.0.0/24 -j REJECT
+iptables -A INPUT -s 192.168.4.0/24 -j REJECT
+`````
+
+
+# 6. Ketika mengakses DNS Server akan secara bergantian didistribusikan ke PROBOLINGGO dan MADIUN pada port 80 (setting iptables di SURABAYA)
+
+Ditambahkan perintah iptables sebagai berikut di SURABAYA:
+
+````
+iptables -A PREROUTING -t nat -p tcp -d 10.151.73.82 --dport 80 -m statistic --mode nth --every 2 --packet 0 -j DNAT --to-destination 192.168.1.2
+iptables -t nat -A PREROUTING -p tcp -d 10.151.73.82 --dport 80 -j DNAT --to-destination 192.168.1.3
+iptables -t nat -A POSTROUTING -p tcp -d 192.168.1.2 --dport 80 -j SNAT --to-source 10.151.73.82 
+iptables -t nat -A POSTROUTING -p tcp -d 192.168.1.3 --dport 80 -j SNAT --to-source 10.151.73.82 
+
+````
+
+Pada PROBOLINGGO dan MADIUN yang merupakan Web Server harus dilakukan instalasi apache2 dengan perintah apt-get install apache2.
+
+Kemudian pada DNS Server yaitu MALANG akan diinstall bind9 dengan perintah apt-get install bind9. Setelah itu dilakukan edit file /etc/bind/named.conf.local dan tambahkan domain baru misalkan jarkoma09.com sebagai berikut:
+
+````
+zone "jarkoma09.com" {
+    type master;
+    file "/etc/bind/jarkom/jarkoma09.com";
+};
+````
+
+
+Kemudian buat folder baru:  ```mkdir /etc/bind/jarkom ```
+
+Dan copy file db.local ke folder yang baru saja dibuat dan mengganti namanya sesuai domain yang diinginkan: cp /etc/bind/db.local /etc/bind/jarkom/jarkoma09.com Kemudian buka file semerua09.pw dengan perintah: nano /etc/bind/jarkom/semerua09.pw.
+
+Edit pointer A menjadi ke IP yang belum digunakan yaitu 192.168.6.1 serta ganti localhost menjadi nama domain yaitu jarkoma09.com.
+
+Setelah itu melakukan restart service bind9 dengan perintah service bind9 restart.
+
+Untuk mengecek, misalkan pada klien SIDOARJO dijalankan nc jarkoma09.com 80 kemudian enter dan ketik apapun misalkan tes. Kemudian pada MADIUN dan PROBOLINGGO akan dicoba lihat apakah diterima dan di mana diterimanya dengan perintah tail /var/log/apache2/access.log. Kemudian lakukan lagi, dan sekarang harusnya diterima di UML yang lainnya (bergantian), berarti berhasil.
+
+# 7. Logging semua paket yang di-DROP
+
+Untuk soal ini konfigurasi akan digabung bersama perintah iptables DROP yaitu untuk nomor 2 dan 3 di atas.
+
+Karena sistem UML semua iptables akan hilang tiap direstart, sebaiknya disimpan dalam file bash script misalkan iptables.sh pada tiap UML yang disetting sebagai berikut:
+
+ <h2> SURABAYA</h2 
+
+````	
+iptables -t nat -A POSTROUTING -s 192.168.0.0/16 -o eth0 -j SNAT --to-source 10.151.72.40
+iptables -N LOGGING
+iptables -A FORWARD -p tcp --dport 22 -d 10.151.73.80/29 -i eth0 -j LOGGING
+iptables -A LOGGING -m limit --limit 5/min -j LOG --log-prefix "iptables_FORWARD_denied: " --log-level 7
+iptables -A LOGGING -j DROP
+iptables -A PREROUTING -t nat -p tcp -d 192.168.6.1 --dport 80 -m statistic --mode nth --every 2 --packet 0 -j DNAT --to-destination 192.168.1.2
+iptables -t nat -A PREROUTING -p tcp -d 192.168.6.1 --dport 80 -j DNAT --to-destination 192.168.1.3
+iptables -t nat -A POSTROUTING -p tcp -d 192.168.1.2 --dport 80 -j SNAT --to-source 192.168.6.1
+iptables -t nat -A POSTROUTING -p tcp -d 192.168.1.3 --dport 80 -j SNAT --to-source 192.168.6.1
+`````
+
+<h2> MALANG </h2>
+
+````
+iptables -N LOGGING
+iptables -A INPUT -p icmp -m connlimit --connlimit-above 3 --connlimit-mask 0 -j LOGGING
+iptables -A LOGGING -m limit --limit 5/min -j LOG --log-prefix "iptables_FORWARD_denied: " --log-level 7
+iptables -A LOGGING -j DROP
+iptables -A INPUT -s 192.168.4.0/24 -m time --timestart 07:00 --timestop 17:00 --weekdays Mon,Tue,Wed,Thu,Fri -j ACCEPT
+iptables -A INPUT -s 192.168.0.0/24 -m time --timestart 17:00 --timestop 23:59 -j ACCEPT
+iptables -A INPUT -s 192.168.0.0/24 -m time --timestart 00:00 --timestop 07:00 -j ACCEPT
+iptables -A INPUT -s 192.168.0.0/24 -j REJECT
+iptables -A INPUT -s 192.168.4.0/24 -j REJECT
+`````
+
+<h2>MOJOKERTO</h2>
+
+````
+iptables -N LOGGING
+iptables -A INPUT -p icmp -m connlimit --connlimit-above 3 --connlimit-mask 0 -j LOGGING
+iptables -A LOGGING -m limit --limit 5/min -j LOG --log-prefix "iptables_FORWARD_denied: " --log-level 7
+iptables -A LOGGING -j DROP
+`````
 
 
 
